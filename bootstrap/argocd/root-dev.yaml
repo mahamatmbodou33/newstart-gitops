@@ -1,0 +1,19 @@
+# The "root app": Argo CD watches clusters/dev/ and creates whatever it finds there.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/mahamatmbodou33/newstart-gitops.git
+    targetRevision: main          # only merged code is deployed
+    path: clusters/dev
+  destination:
+    server: https://kubernetes.default.svc   # "this same cluster"
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true      # file deleted from Git -> object deleted from cluster
+      selfHeal: true   # someone kubectl-edits by hand -> Argo CD reverts it
