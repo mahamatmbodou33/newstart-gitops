@@ -1,0 +1,43 @@
+# AppProjects = guardrails. Each Application must belong to one.
+# "platform": cluster add-ons, may install cluster-wide things.
+# "newstart": the app, may ONLY touch its own namespace.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"   # create projects before the apps that use them
+spec:
+  description: Cluster add-ons (networking, DNS, secrets, autoscaling, logging)
+  sourceRepos:
+    - https://github.com/mahamatmbodou33/newstart-gitops.git
+    - https://aws.github.io/eks-charts                 # LB controller, Fluent Bit
+    - https://kubernetes-sigs.github.io/external-dns
+    - https://charts.external-secrets.io
+    - https://kubernetes-sigs.github.io/metrics-server
+    - public.ecr.aws/karpenter                         # Karpenter (OCI chart)
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "*"
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: newstart
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+spec:
+  description: NewStart application (namespace-scoped only)
+  sourceRepos:
+    - https://github.com/mahamatmbodou33/newstart-gitops.git
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: newstart
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace          # it may create its own namespace, nothing else cluster-wide

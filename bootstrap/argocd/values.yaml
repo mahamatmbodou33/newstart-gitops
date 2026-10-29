@@ -1,0 +1,34 @@
+# Argo CD install settings (Helm chart argo/argo-cd).
+# Installed ONCE by hand; after that Argo CD manages everything else from Git.
+
+global:
+  # Run Argo CD on the always-on "system" node group, not on Karpenter nodes
+  # (Karpenter may remove its nodes; the GitOps engine should stay put).
+  nodeSelector:
+    node-role/system: "true"
+
+configs:
+  cm:
+    # How often Argo CD checks Git for changes (default 3m is fine).
+    timeout.reconciliation: 180s
+  params:
+    # Show the UI only through kubectl port-forward (no public load balancer).
+    server.insecure: true
+
+server:
+  service:
+    type: ClusterIP          # not exposed to the internet
+
+dex:
+  enabled: false             # no SSO for now; we use the admin login
+
+notifications:
+  enabled: false             # can add Slack alerts later
+
+# Small requests so it fits on the 2 system nodes
+controller:
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+repoServer:
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
