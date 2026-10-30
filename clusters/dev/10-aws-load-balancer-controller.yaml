@@ -1,0 +1,36 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aws-load-balancer-controller
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io   # deleting this app removes what it installed
+spec:
+  project: platform
+  source:
+    repoURL: https://aws.github.io/eks-charts
+    chart: aws-load-balancer-controller
+    targetRevision: 3.6.2                  # pinned chart version
+    helm:
+      valuesObject:
+        clusterName: k8s-portfolio-dev
+        region: us-east-1
+        # Find the VPC by its Name tag instead of a hard-coded vpc-xxxx id,
+        # so this file still works after dev is destroyed and re-created.
+        vpcTags:
+          Name: k8s-portfolio-dev
+        replicaCount: 2
+        serviceAccount:
+          create: true
+          name: aws-load-balancer-controller   # must match the Pod Identity association
+        nodeSelector:
+          node-role/system: "true"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system                     # must match the Pod Identity association
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions:
+      - ServerSideApply=true
