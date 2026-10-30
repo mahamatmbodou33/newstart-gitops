@@ -1,0 +1,41 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: external-dns
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: https://kubernetes-sigs.github.io/external-dns
+    chart: external-dns
+    targetRevision: 1.23.0
+    helm:
+      valuesObject:
+        provider:
+          name: aws
+        env:
+          - name: AWS_DEFAULT_REGION
+            value: us-east-1
+        serviceAccount:
+          create: true
+          name: external-dns                   # must match the Pod Identity association
+        sources: [ingress]                     # only watch Ingresses
+        domainFilters: [dev.mbodou.org]        # dev may only manage *.dev.mbodou.org
+        policy: upsert-only                    # create/update records, never delete
+        registry: txt
+        txtOwnerId: k8s-portfolio-dev          # tags records as "owned by dev cluster"
+        txtPrefix: extdns-
+        interval: 1m
+        nodeSelector:
+          node-role/system: "true"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: external-dns
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions:
+      - CreateNamespace=true
