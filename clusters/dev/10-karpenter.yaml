@@ -1,0 +1,38 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: karpenter
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: public.ecr.aws/karpenter      # OCI: no https://, matches the repo Secret
+    chart: karpenter
+    targetRevision: 1.15.1
+    helm:
+      valuesObject:
+        settings:
+          clusterName: k8s-portfolio-dev
+          interruptionQueue: k8s-portfolio-dev-karpenter   # SQS queue from Terraform
+        serviceAccount:
+          name: karpenter                  # must match the Pod Identity association
+        replicas: 2
+        # Run ONLY on the managed "system" nodes, never on nodes Karpenter itself creates
+        nodeSelector:
+          karpenter.sh/controller: "true"
+        dnsPolicy: Default
+        controller:
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits:   { memory: 512Mi }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system                 # must match the Pod Identity association
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions:
+      - ServerSideApply=true
