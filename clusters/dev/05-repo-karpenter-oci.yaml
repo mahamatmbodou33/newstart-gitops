@@ -1,0 +1,16 @@
+# Registers ECR Public as an OCI Helm repository. Public: no credentials needed,
+# so this Secret is safe to keep in Git.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: repo-karpenter-oci
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository   # Argo CD reads this label
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+stringData:
+  name: karpenter
+  type: helm
+  url: public.ecr.aws/karpenter
+  enableOCI: "true"

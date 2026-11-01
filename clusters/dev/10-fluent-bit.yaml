@@ -1,0 +1,43 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aws-for-fluent-bit
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: https://aws.github.io/eks-charts
+    chart: aws-for-fluent-bit
+    targetRevision: 0.2.0
+    helm:
+      valuesObject:
+        serviceAccount:
+          create: true
+          name: aws-for-fluent-bit            # must match the Pod Identity association
+        # The modern, fast CloudWatch output plugin
+        cloudWatchLogs:
+          enabled: true
+          region: us-east-1
+          logGroupName: /eks/k8s-portfolio-dev/containers   # created by Terraform
+          logStreamPrefix: "fluentbit-"
+          autoCreateGroup: false              # Terraform owns the group (and its retention)
+        # Turn off every output we don't use
+        cloudWatch:
+          enabled: false                      # legacy plugin
+        firehose:
+          enabled: false
+        kinesis:
+          enabled: false
+        elasticsearch:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: logging                        # must match the Pod Identity association
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions:
+      - CreateNamespace=true
