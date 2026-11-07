@@ -1,0 +1,29 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - external-secrets.yaml
+  - db-bootstrap.yaml
+  - user-service.yaml
+  - opportunity-service.yaml
+  - checklist-service.yaml
+  - notification-service.yaml
+
+# Shared, non-secret settings for all backend services.
+# The generator adds a content hash to the name (newstart-config-7f8k2...),
+# so changing a value here automatically rolls out the pods that use it.
+configMapGenerator:
+  - name: newstart-config
+    literals:
+      - NODE_ENV=production
+      - LOG_LEVEL=info
+      - CORS_ALLOWED_ORIGINS=https://app.dev.mbodou.org
+      # In-cluster DNS names of each service (namespace-local)
+      - USER_SERVICE_URL=http://user-service:3000
+      - OPPORTUNITY_SERVICE_URL=http://opportunity-service:3001
+      - CHECKLIST_SERVICE_URL=http://checklist-service:3002
+      - NOTIFICATION_SERVICE_URL=http://notification-service:3003
+      # notification-service background worker; SKIP LOCKED lets several replicas share the queue safely
+      - WORKER_ENABLED=true
+      - QUEUE_SKIP_LOCKED=true
