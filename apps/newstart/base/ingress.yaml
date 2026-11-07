@@ -1,0 +1,35 @@
+# The Load Balancer Controller turns this into a real AWS ALB.
+# ExternalDNS sees the host below and creates app.dev.mbodou.org -> ALB in Route 53.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: newstart
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+    alb.ingress.kubernetes.io/scheme: internet-facing          # public ALB in the public subnets
+    alb.ingress.kubernetes.io/target-type: ip                  # send traffic straight to pod IPs
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"              # http:// -> https://
+    alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS13-1-2-2021-06   # TLS 1.2/1.3 only
+    alb.ingress.kubernetes.io/load-balancer-attributes: routing.http.drop_invalid_header_fields.enabled=true
+    alb.ingress.kubernetes.io/tags: project=k8s-portfolio,environment=dev
+spec:
+  ingressClassName: alb
+  tls:
+    - hosts: [app.dev.mbodou.org]    # no ARN: the controller finds the matching ACM cert (*.dev.mbodou.org)
+  rules:
+    - host: app.dev.mbodou.org
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway
+                port: { name: http }
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port: { name: http }
