@@ -1,0 +1,140 @@
+# 1) Migration Job: creates/updates this service's tables, once per deploy.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: checklist-service-migrate
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "2"          # after db-bootstrap (1), before Deployments (3)
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: checklist-service-migrate
+        app.kubernetes.io/part-of: newstart
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      nodeSelector:
+        node-role/apps: "true"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000                        # the "node" user in the image
+        runAsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: migrate
+          image: newstart/checklist-service         # placeholder; Kustomize sets ECR repo + tag
+          # Same image as the app, different command: only run migrations.
+          args: ["/app/node_modules/.bin/node-pg-migrate", "up"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: checklist-service-db, key: DATABASE_URL }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { memory: 256Mi }
+---
+# 2) Deployment: the long-running server.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checklist-service
+  labels:
+    app.kubernetes.io/name: checklist-service
+    app.kubernetes.io/part-of: newstart
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: checklist-service
+  strategy:
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }   # new pod must be ready before an old one stops
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: checklist-service
+        app.kubernetes.io/part-of: newstart
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector:
+        node-role/apps: "true"                 # run on Karpenter nodes, not system nodes
+      topologySpreadConstraints:               # spread replicas across availability zones
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app.kubernetes.io/name: checklist-service }
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: app
+          image: newstart/checklist-service
+          # Override the image CMD: start the server only (migrations ran in the Job).
+          # "args" replaces CMD but keeps ENTRYPOINT, so tini stays PID 1.
+          args: ["node", "dist/index.js"]
+          ports:
+            - { name: http, containerPort: 3002 }
+          envFrom:
+            - configMapRef: { name: newstart-config }   # Kustomize rewrites to the hashed name
+          env:
+            - { name: SERVICE_NAME, value: checklist-service }
+            - { name: PORT, value: "3002" }
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: checklist-service-db, key: DATABASE_URL }
+          # Probes map to the app's own endpoints:
+          startupProbe:                        # allow up to 60s to boot before other probes start
+            httpGet: { path: /health, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:                      # /ready checks the DB: no traffic until it answers
+            httpGet: { path: /ready, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:                       # /health: restart only if the process is stuck
+            httpGet: { path: /health, port: http }
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+# 3) Service: stable in-cluster address -> http://checklist-service:3002
+apiVersion: v1
+kind: Service
+metadata:
+  name: checklist-service
+  labels:
+    app.kubernetes.io/name: checklist-service
+    app.kubernetes.io/part-of: newstart
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  selector:
+    app.kubernetes.io/name: checklist-service
+  ports:
+    - { name: http, port: 3002, targetPort: http }

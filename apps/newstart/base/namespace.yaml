@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: newstart
+  labels:
+    # Pod Security Admission: reject any pod that runs as root, can escalate
+    # privileges, or adds Linux capabilities. Enforced by Kubernetes itself.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"

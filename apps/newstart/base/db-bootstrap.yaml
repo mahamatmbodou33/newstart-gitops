@@ -1,0 +1,108 @@
+# The script, stored as a ConfigMap and mounted into the Job.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: db-bootstrap-script
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+data:
+  bootstrap.sh: |
+    #!/bin/sh
+    # Idempotent: safe to run on every deploy. Never drops anything.
+    set -eu
+
+    until pg_isready -q; do echo "waiting for RDS..."; sleep 5; done
+
+    for svc in USERS OPPS CHECKLISTS NOTIFS; do
+      eval u=\$${svc}_DB_USER
+      eval p=\$${svc}_DB_PASSWORD
+      eval d=\$${svc}_DB_NAME
+      echo "ensuring role '$u' and database '$d'"
+
+      psql -v ON_ERROR_STOP=1 -q -v u="$u" -v p="$p" -v d="$d" <<'SQL'
+    -- Postgres 16+: let the master user act as (SET ROLE) the roles it creates,
+    -- which CREATE DATABASE ... OWNER requires.
+    SET createrole_self_grant = 'set, inherit';
+
+    SELECT format('CREATE ROLE %I LOGIN', :'u')
+     WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = :'u') \gexec
+
+    -- Always (re)set the password, so a rotated secret takes effect on next deploy.
+    SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', :'u', :'p') \gexec
+
+    SELECT format('CREATE DATABASE %I OWNER %I', :'d', :'u')
+     WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = :'d') \gexec
+
+    -- Only the owner may connect: services can't read each other's data.
+    SELECT format('REVOKE ALL ON DATABASE %I FROM PUBLIC', :'d') \gexec
+    SQL
+    done
+
+    echo "bootstrap complete"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-bootstrap
+  annotations:
+    argocd.argoproj.io/hook: Sync                              # run as part of every sync...
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation  # ...replacing the previous run
+    argocd.argoproj.io/sync-wave: "1"                          # after secrets (0), before migrations (2)
+spec:
+  backoffLimit: 3                 # retry a failed run up to 3 times
+  activeDeadlineSeconds: 600      # give up after 10 minutes
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false   # this pod never talks to the Kubernetes API
+      nodeSelector:
+        node-role/apps: "true"
+      securityContext:                      # required by the "restricted" namespace
+        runAsNonRoot: true
+        runAsUser: 70                       # the "postgres" user in the alpine image
+        runAsGroup: 70
+        seccompProfile: { type: RuntimeDefault }
+      volumes:
+        - name: script
+          configMap: { name: db-bootstrap-script, defaultMode: 0555 }
+        - name: certs
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+      initContainers:
+        # Download the RDS CA bundle so psql can VERIFY the server (verify-full).
+        - name: fetch-rds-ca
+          image: curlimages/curl:8.11.1
+          command: ["curl", "-fsS", "-o", "/certs/rds-ca.pem",
+                    "https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem"]
+          volumeMounts: [{ name: certs, mountPath: /certs }]
+          securityContext: &hardened
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { memory: 32Mi }
+      containers:
+        - name: psql
+          image: postgres:17-alpine           # psql client matching RDS major version
+          command: ["/scripts/bootstrap.sh"]
+          env:
+            - { name: PGSSLMODE, value: verify-full }
+            - { name: PGSSLROOTCERT, value: /certs/rds-ca.pem }
+            - { name: PGCONNECT_TIMEOUT, value: "10" }
+            - { name: HOME, value: /tmp }
+          envFrom:
+            - secretRef: { name: rds-master }                         # PGHOST, PGUSER, PGPASSWORD...
+            - { prefix: USERS_,      secretRef: { name: user-service-db } }
+            - { prefix: OPPS_,       secretRef: { name: opportunity-service-db } }
+            - { prefix: CHECKLISTS_, secretRef: { name: checklist-service-db } }
+            - { prefix: NOTIFS_,     secretRef: { name: notification-service-db } }
+          volumeMounts:
+            - { name: script, mountPath: /scripts }
+            - { name: certs,  mountPath: /certs, readOnly: true }
+            - { name: tmp,    mountPath: /tmp }
+          securityContext: *hardened
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { memory: 128Mi }
