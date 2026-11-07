@@ -1,0 +1,87 @@
+# 1) Deny all incoming traffic to every pod in the namespace, unless allowed below.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+# 2) Edge pods: the ALB (inside the VPC) may reach the gateway and frontend on 8080.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-alb-to-edge
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/name, operator: In, values: [api-gateway, frontend] }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock: { cidr: 10.10.0.0/16 }    # dev VPC CIDR (ALB lives in the public subnets)
+      ports:
+        - { protocol: TCP, port: 8080 }
+---
+# 3) user-service: called by the gateway and by opportunity-service.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-user-service
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: user-service }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: api-gateway } }
+        - podSelector: { matchLabels: { app.kubernetes.io/name: opportunity-service } }
+      ports:
+        - { protocol: TCP, port: 3000 }
+---
+# 4) opportunity-service: gateway only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-opportunity-service
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: opportunity-service }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: api-gateway } }
+      ports:
+        - { protocol: TCP, port: 3001 }
+---
+# 5) checklist-service: gateway only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-checklist-service
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: checklist-service }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: api-gateway } }
+      ports:
+        - { protocol: TCP, port: 3002 }
+---
+# 6) notification-service: gateway + the two services that send notifications.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-notification-service
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: notification-service }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app.kubernetes.io/name: api-gateway } }
+        - podSelector: { matchLabels: { app.kubernetes.io/name: opportunity-service } }
+        - podSelector: { matchLabels: { app.kubernetes.io/name: checklist-service } }
+      ports:
+        - { protocol: TCP, port: 3003 }
