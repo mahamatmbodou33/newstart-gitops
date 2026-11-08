@@ -1,0 +1,35 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Put every namespaced object into "newstart"
+namespace: newstart
+
+resources:
+  - ../../base
+
+# Label everything as dev (not added to selectors, so it's safe to change later)
+labels:
+  - pairs:
+      app.kubernetes.io/environment: dev
+
+# Swap the placeholder image names for the real ECR images + the release tag.
+# CI (Part 9.8) updates ONLY the newTag lines - that is a deploy.
+images:
+  - name: newstart/user-service
+    newName: 014498647009.dkr.ecr.us-east-1.amazonaws.com/k8s-portfolio/user-service
+    newTag: "fed5f5daa17c"
+  - name: newstart/opportunity-service
+    newName: 014498647009.dkr.ecr.us-east-1.amazonaws.com/k8s-portfolio/opportunity-service
+    newTag: "fed5f5daa17c"
+  - name: newstart/checklist-service
+    newName: 014498647009.dkr.ecr.us-east-1.amazonaws.com/k8s-portfolio/checklist-service
+    newTag: "fed5f5daa17c"
+  - name: newstart/notification-service
+    newName: 014498647009.dkr.ecr.us-east-1.amazonaws.com/k8s-portfolio/notification-service
+    newTag: "fed5f5daa17c"
+  - name: newstart/api-gateway
+    newName: 014498647009.dkr.ecr.us-east-1.amazonaws.com/k8s-portfolio/api-gateway
+    newTag: "fed5f5daa17c"
+  - name: newstart/frontend
+    newName: 014498647009.dkr.ecr.us-east-1.amazonaws.com/k8s-portfolio/frontend
+    newTag: "fed5f5daa17c"

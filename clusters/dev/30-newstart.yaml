@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: newstart
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"          # after all platform add-ons (0-1)
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: newstart                            # the restricted project from 8.2
+  source:
+    repoURL: https://github.com/mahamatmbodou33/newstart-gitops.git
+    targetRevision: main
+    path: apps/newstart/overlays/dev
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: newstart
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions:
+      - PruneLast=true                         # remove old objects only after new ones are healthy
+    retry:
+      limit: 5
+      backoff: { duration: 30s, factor: 2, maxDuration: 5m }
