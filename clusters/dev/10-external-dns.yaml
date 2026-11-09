@@ -25,6 +25,10 @@ spec:
           name: external-dns                   # must match the Pod Identity association
         sources: [ingress]                     # only watch Ingresses
         domainFilters: [dev.mbodou.org]        # dev may only manage *.dev.mbodou.org
+        # The filter (dev.mbodou.org) is a subdomain of the hosted zone (mbodou.org).
+        # This flag lets ExternalDNS use that parent zone while still only touching *.dev.mbodou.org.
+        extraArgs:
+          - --aws-zone-match-parent
         policy: upsert-only                    # create/update records, never delete
         registry: txt
         txtOwnerId: k8s-portfolio-dev          # tags records as "owned by dev cluster"
